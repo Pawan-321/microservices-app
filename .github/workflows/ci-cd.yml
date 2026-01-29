@@ -1,0 +1,138 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: microservices-demo
+  K8S_MASTER_IP: ${{ secrets.K8S_MASTER_IP }}
+
+jobs:
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+    
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.20'
+    
+    - name: Run unit tests
+      run: |
+        for service in src/*/; do
+          if [ -f "$service/go.mod" ]; then
+            echo "Testing $service"
+            cd $service
+            go test ./... -v
+            cd ../..
+          fi
+        done
+
+  build:
+    name: Build and Push Docker Images
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+    
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v2
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+    
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v1
+    
+    - name: Build, tag, and push images
+      env:
+        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        IMAGE_TAG: ${{ github.sha }}
+      run: |
+        services=(
+          "adservice"
+          "cartservice"
+          "checkoutservice"
+          "currencyservice"
+          "emailservice"
+          "frontend"
+          "paymentservice"
+          "productcatalogservice"
+          "recommendationservice"
+          "shippingservice"
+        )
+        
+        for service in "${services[@]}"; do
+          echo "Building $service..."
+          docker build -t $ECR_REGISTRY/$service:$IMAGE_TAG -f src/$service/Dockerfile src/$service
+          docker push $ECR_REGISTRY/$service:$IMAGE_TAG
+          docker tag $ECR_REGISTRY/$service:$IMAGE_TAG $ECR_REGISTRY/$service:latest
+          docker push $ECR_REGISTRY/$service:latest
+        done
+
+  deploy:
+    name: Deploy to Kubernetes
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+    
+    - name: Configure kubectl
+      run: |
+        mkdir -p ~/.kube
+        echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > ~/.kube/config
+    
+    - name: Update Kubernetes manifests
+      env:
+        IMAGE_TAG: ${{ github.sha }}
+      run: |
+        # Update image tags in Kubernetes manifests
+        find k8s-manifests -name "*.yaml" -exec sed -i "s|:latest|:$IMAGE_TAG|g" {} \;
+    
+    - name: Deploy to Kubernetes
+      run: |
+        kubectl apply -f k8s-manifests/
+        kubectl rollout status deployment/frontend -n default
+    
+    - name: Verify deployment
+      run: |
+        kubectl get pods -n default
+        kubectl get services -n default
+
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    needs: test
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+    
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        scan-type: 'fs'
+        scan-ref: '.'
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+    
+    - name: Upload Trivy results to GitHub Security
+      uses: github/codeql-action/upload-sarif@v2
+      with:
+        sarif_file: 'trivy-results.sarif'
