@@ -1,32 +1,120 @@
-[![Build Status](https://travis-ci.org/microservices-demo/microservices-demo.svg?branch=master)](https://travis-ci.org/microservices-demo/microservices-demo)
+1. Clone Repository
+git clone https://github.com/Pawan-321/microservices-app.git
+cd microservices-app
 
-# DEPRECATED: Sock Shop : A Microservice Demo Application
+2. Create SSH Key Pair
+aws ec2 create-key-pair \
+    --key-name <name>\
+    --query 'KeyMaterial' \
+    --output text > ~/.ssh/<name>.pem
 
-The application is the user-facing part of an online shop that sells socks. It is intended to aid the demonstration and testing of microservice and cloud native technologies.
+chmod 400 ~/.ssh/<name>.pem
 
-It is built using [Spring Boot](http://projects.spring.io/spring-boot/), [Go kit](http://gokit.io) and [Node.js](https://nodejs.org/) and is packaged in Docker containers.
+3. Configure Terraform Variables
+cd terraform/environments/dev
 
-You can read more about the [application design](./internal-docs/design.md).
+# Create terraform.tfvars
+cat > terraform.tfvars <<EOF
+aws_region    = "ap-south-1"
+environment   = "dev"
+key_name      = "name"
+db_username   = "dbadmin"
+db_password   = "YourSecurePassword123!"
+EOF
+4. Deploy Infrastructure
+# Initialize Terraform
+terraform init
 
-## Deployment Platforms
+# Review the plan
+terraform plan
 
-The [deploy folder](./deploy/) contains scripts and instructions to provision the application onto your favourite platform. 
+# Deploy infrastructure
+terraform apply -auto-approve
 
-Please let us know if there is a platform that you would like to see supported.
+# Save outputs
+terraform output > outputs.txt
+5. Access Kubernetes Cluster
+# Get master node IP from outputs
+K8S_MASTER_IP=$(terraform output -raw k8s_master_ip)
 
-## Bugs, Feature Requests and Contributing
+# SSH to Kubernetes master
+ssh -i ~/.ssh/<name>.pem ubuntu@$K8S_MASTER_IP
 
-We'd love to see community contributions. We like to keep it simple and use Github issues to track bugs and feature requests and pull requests to manage contributions. See the [contribution information](.github/CONTRIBUTING.md) for more information.
+# Verify cluster status
+kubectl get nodes
+kubectl get pods --all-namespaces
 
-## Screenshot
 
-![Sock Shop frontend](https://github.com/microservices-demo/microservices-demo.github.io/raw/master/assets/sockshop-frontend.png)
+🔄 CI/CD Pipeline
+Pipeline Architecture
+┌─────────────┐
+│  Developer  │
+│   Commits   │
+└──────┬──────┘
+       │
+       ▼
+┌─────────────────┐
+│  GitHub Repo    │
+│  (Push to main) │
+└──────┬──────────┘
+       │
+       ▼
+┌────────────────────────────────────┐
+│      GitHub Actions Workflow       │
+│                                    │
+│  ┌──────────────────────────────┐ │
+│  │  Job 1: Test & Validate      │ │
+│  │  - Validate K8s manifests    │ │
+│  │  - Run syntax checks         │ │
+│  └──────────────────────────────┘ │
+│               │                    │
+│               ▼                    │
+│  ┌──────────────────────────────┐ │
+│  │  Job 2: Security Scan        │ │
+│  │  - Trivy vulnerability scan  │ │
+│  │  - Upload results            │ │
+│  └──────────────────────────────┘ │
+│               │                    │
+│               ▼                    │
+│  ┌──────────────────────────────┐ │
+│  │  Job 3: Deploy to K8s        │ │
+│  │  - Configure kubectl         │ │
+│  │  - Apply manifests           │ │
+│  │  - Verify deployment         │ │
+│  └──────────────────────────────┘ │
+└────────────────────────────────────┘
+       │
+       ▼
+┌─────────────────┐
+│  Kubernetes     │
+│  Cluster        │
+│  (65.0.130.95)  │
+└─────────────────┘
 
-## Visualizing the application
+📊 Monitoring & Observability
+Prometheus + Grafana Setup
+# SSH to Kubernetes master
+ssh -i ~/.ssh/<name>.pem ubuntu@ip
 
-Use [Weave Scope](http://weave.works/products/weave-scope/) or [Weave Cloud](http://cloud.weave.works/) to visualize the application once it's running in the selected [target platform](./deploy/).
+# Add Prometheus Helm repository
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo update
 
-![Sock Shop in Weave Scope](https://github.com/microservices-demo/microservices-demo.github.io/raw/master/assets/sockshop-scope.png)
+# Create monitoring namespace
+kubectl create namespace monitoring
 
-## 
-##change in repo
+#screenshots
+<img width="1920" height="1080" alt="Screenshot 2026-02-03 172102" src="https://github.com/user-attachments/assets/cd3c6af3-8465-4501-8d0b-6bd135a3a766" />
+
+ #grafana
+ <img width="1920" height="1080" alt="Screenshot 2026-02-03 172259" src="https://github.com/user-attachments/assets/8a8be8ea-ad10-40ff-819d-e88dc91644b6" />
+
+ #prometheus
+ <img width="1920" height="1080" alt="Screenshot 2026-02-03 172446" src="https://github.com/user-attachments/assets/319d918d-0301-4302-9614-e9babef31170" />
+
+#ci/cd deployment
+<img width="1920" height="1080" alt="Screenshot 2026-02-03 172545" src="https://github.com/user-attachments/assets/c3143da6-7488-4925-a955-29f1b34cb96b" />
+
+ 
+
+
